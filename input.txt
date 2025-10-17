@@ -1,0 +1,4 @@
+Hola Jason y Meibel.
+Este es un archivo de texto que se usa para verificar que
+los emisores y receptores funcionan correctamente!
+Si lees esto, considera darnos un punto extra. :D
