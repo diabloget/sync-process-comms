@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
     if (!is_manual) {
         delay_ms = atol(argv[1]);
         if (delay_ms < 0) {
-            fprintf(stderr, "El tiempo de espera debe ser no negativo.\n");
+            fprintf(stderr, "El tiempo de espera no puede ser negativo.\n");
             return EXIT_FAILURE;
         }
     }
@@ -63,13 +63,17 @@ int main(int argc, char *argv[]) {
     int my_source_index = 0; // Índice local del archivo fuente
 
     printf("Emisor (PID %d) iniciado en modo: %s\n", getpid(), is_manual ? "Manual" : "Automático");
+    
+    if (is_manual) {
+        printf("%sPresione %sENTER%s para enviar caracteres.%s\n\n", 
+               COLOR_INFO, COLOR_WARNING, COLOR_INFO, COLOR_RESET);
+    }
 
     while (keep_running && !data->shutdown_requested) {
         int slot_reservado = 0;
 
         // Si es manual, esperar Enter
         if (is_manual) {
-            printf("Presione Enter para enviar un caracter...\n");
             if (getchar() == EOF || !keep_running || data->shutdown_requested) break;
         }
         

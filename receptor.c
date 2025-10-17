@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
     if (!is_manual) {
         delay_ms = atol(argv[1]);
         if (delay_ms < 0) {
-            fprintf(stderr, "El tiempo debe ser no negativo.\n");
+            fprintf(stderr, "El tiempo no puede ser negativo.\n");
             return EXIT_FAILURE;
         }
     }
@@ -91,11 +91,15 @@ int main(int argc, char *argv[]) {
     printf("Receptor (PID %d) en modo %s. Escribiendo a %s\n",
            getpid(), is_manual ? "Manual" : "Automático", filename);
 
+    if (is_manual) {
+        printf("%sPresione %sENTER%s para leer caracteres.%s\n\n", 
+               COLOR_INFO, COLOR_WARNING, COLOR_INFO, COLOR_RESET);
+    }
+
     // Bucle principal
     while (keep_running && !data->shutdown_requested) {
         // Espera manual
         if (is_manual) {
-            printf("Presione Enter para leer el siguiente caracter...\n");
             if (getchar() == EOF || !keep_running || data->shutdown_requested) break;
         }
 
@@ -125,10 +129,10 @@ int main(int argc, char *argv[]) {
 
         // Si es el último lector, liberar el espacio
         if (reads_after == 0) {
-            printf("     └─ ¡Último lector! Búfer[%d] liberado.\n", my_read_idx);
+            printf("      * Último lector: Búfer[%d] liberado.\n", my_read_idx);
             sem_post(&data->empty_slots);
         } else {
-            printf("     └─ Quedan %d lectores para el búfer[%d].\n", reads_after, my_read_idx);
+            printf("      * Faltan %d lectores[%d].\n", reads_after, my_read_idx);
         }
 
         // Liberar el slot

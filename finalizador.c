@@ -5,7 +5,7 @@ int main(int argc, char *argv[]) {
     (void)argv;
     
     // Mensaje inicial e instalación de señal Ctrl+C
-    printf("Finalizador iniciado. Presione Ctrl+C para apagar y mostrar estadísticas.\n");
+    printf("Para iniciar el proceso de finalización presione Ctrl+C.\n");
     signal(SIGINT, sigterm_handler);
     
     // Abrir memoria compartida existente
@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         pause();
     }
     
-    printf("\n\033[1;33mSeñal de apagado recibida. Iniciando cierre elegante...\033[0m\n");
+    printf("\n\033[1;33mCtrl+C presionado, procedo con la finalización de procesos.\033[0m\n");
 
     data->shutdown_requested = 1; // Avisar a todos que deben cerrar
 
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
     // Enviar SIGTERM a los procesos emisor
     system("pkill -SIGTERM emisor 2>/dev/null");
     
-    printf("Esperando a que todos los procesos finalicen (%d procesos activos)...\n", total_processes);
+    printf("Esperando a que todos los procesos finalicen (%d procesos activos)\n", total_processes);
     
     // Esperar que cada proceso confirme su finalización
     for (int i = 0; i < total_processes; i++) {
@@ -75,22 +75,23 @@ int main(int argc, char *argv[]) {
         }
         int remaining = total_processes - i - 1;
         if (remaining > 0) {
-            printf("  ... %d proceso(s) restante(s) ...\n", remaining);
+            printf("  %d proceso(s) restante(s)\n", remaining);
         }
     }
     
-    printf("\033[1;32m✓ Todos los procesos han finalizado.\033[0m\n");
+    printf("\033[1;32mProcesos finalizados con exito.\033[0m\n");
 
     // Estadisticas
-    printf("\n\033[1;36m========== ESTADÍSTICAS FINALES ==========\033[0m\n");
-    printf("  • Total de emisores conectados: %d\n", data->total_emitters);
-    printf("  • Total de receptores conectados: %d\n", data->total_receivers);
-    printf("  • Caracteres transferidos: %ld\n", data->total_chars_transferred);
-    printf("  • Emisores activos al finalizar: %d\n", data->active_emitters);
-    printf("  • Receptores activos al finalizar: %d\n", data->active_receivers);
-    printf("\033[1;36m==========================================\033[0m\n");
+    // Mostrar estadísticas
+    printf("\n\033[1;36m⸻⸻⸻⸻   Estadísticas de Ejecución ⸻⸻⸻⸻\033[0m\n");
+    printf("  * Total de emisores conectados: \033[0;33m%d\033[0m\n", data->total_emitters);
+    printf("  * Total de receptores conectados: \033[0;33m%d\033[0m\n", data->total_receivers);
+    printf("  * Caracteres transferidos: \033[0;32m%ld\033[0m\n", data->total_chars_transferred);
+    printf("  * Emisores activos al finalizar: \033[0;31m%d\033[0m\n", data->active_emitters);
+    printf("  * Receptores activos al finalizar: \033[0;31m%d\033[0m\n", data->active_receivers);
+    printf("\033[1;36m⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻\033[0m\n");
 
-    printf("\nLiberando recursos del sistema...\n");
+    printf("\nProcedo a liberar recursos del sistema.\n");
     
     // Destruir semáforos 
     sem_destroy(&data->empty_slots);
@@ -113,6 +114,6 @@ int main(int argc, char *argv[]) {
     munmap(data, shm_size);
     shm_unlink(SHM_NAME);
     
-    printf("\033[1;32m✓ Limpieza completada. Finalizador terminando.\033[0m\n");
+    printf("\033[1;32mLimpieza completa.\033[0m\n");
     return EXIT_SUCCESS;
 }

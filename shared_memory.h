@@ -18,6 +18,28 @@
 #define MAX_RECEIVERS 50
 #define MAX_FILE_SIZE 4096
 
+// Codigos de color ANSI
+#define COLOR_RESET     "\033[0m"
+#define COLOR_BOLD      "\033[1m"
+
+// Colores para el emisor
+#define COLOR_EMISOR_HEADER   "\033[1;32m"  // Verde brillante
+#define COLOR_EMISOR_CHAR     "\033[0;36m"  // Cian
+#define COLOR_EMISOR_BUFFER   "\033[0;33m"  // Amarillo
+#define COLOR_EMISOR_TIME     "\033[0;35m"  // Magenta
+
+// Colores para el receptor
+#define COLOR_RECEPTOR_HEADER "\033[1;34m"  // Azul brillante
+#define COLOR_RECEPTOR_CHAR   "\033[0;36m"  // Cian
+#define COLOR_RECEPTOR_BUFFER "\033[0;33m"  // Amarillo
+#define COLOR_RECEPTOR_TIME   "\033[0;35m"  // Magenta
+
+// Colores para info adicional
+#define COLOR_INFO      "\033[0;90m"  // Gris
+#define COLOR_SUCCESS   "\033[0;32m"  // Verde
+#define COLOR_WARNING   "\033[0;33m"  // Amarillo
+#define COLOR_ERROR     "\033[0;31m"  // Rojo
+
 // Bandera usada para finalizar procesos
 static volatile sig_atomic_t keep_running = 1;
 
@@ -82,17 +104,28 @@ static inline void print_char_info(const char* role, pid_t pid, char c, int inde
         case '\n': strcpy(display_char, "\\n"); break;
         case '\r': strcpy(display_char, "\\r"); break;
         case '\t': strcpy(display_char, "\\t"); break;
+        case ' ':  strcpy(display_char, "⎵");  break;
         default:
             if (c >= 32 && c <= 126) sprintf(display_char, "%c", c);
             else sprintf(display_char, "?");
             break;
     }
 
-    const char* color = (strcmp(role, "Emisor") == 0) ? "\033[0;32m" : "\033[0;34m";
-    const char* reset_color = "\033[0m";
-
-    printf("%s%-8s (PID %-5d) | Carácter: '%-2s' | Búfer[%-3d] | Hora: %s%s\n",
-           color, role, pid, display_char, index, time_str, reset_color);
+    if (strcmp(role, "Emisor") == 0) {
+        printf("%s%-8s%s (PID %s%d%s) │ Carácter: %s'%s'%s │ Búfer%s[%d]%s │ Hora: %s%s%s\n",
+               COLOR_EMISOR_HEADER, role, COLOR_RESET,
+               COLOR_INFO, pid, COLOR_RESET,
+               COLOR_EMISOR_CHAR, display_char, COLOR_RESET,
+               COLOR_EMISOR_BUFFER, index, COLOR_RESET,
+               COLOR_EMISOR_TIME, time_str, COLOR_RESET);
+    } else {
+        printf("%s%-8s%s (PID %s%d%s) │ Carácter: %s'%s'%s │ Búfer%s[%d]%s │ Hora: %s%s%s\n",
+               COLOR_RECEPTOR_HEADER, role, COLOR_RESET,
+               COLOR_INFO, pid, COLOR_RESET,
+               COLOR_RECEPTOR_CHAR, display_char, COLOR_RESET,
+               COLOR_RECEPTOR_BUFFER, index, COLOR_RESET,
+               COLOR_RECEPTOR_TIME, time_str, COLOR_RESET);
+    }
 }
 
 // Manejador de señal para apagar los procesos limpiamente

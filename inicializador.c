@@ -123,9 +123,13 @@ int main(int argc, char *argv[]) {
     
     // Mensaje final de éxito
     printf("Memoria compartida inicializada correctamente.\n");
-    printf("  • Buffer: %d espacios\n", buffer_size);
-    printf("  • Archivo '%s' cargado (%d bytes)\n", source_file, data->source_size);
-    printf("  • Tamaño total de memoria compartida: %zu bytes\n", shm_size);
+    printf("%sConfiguración:%s\n", COLOR_BOLD, COLOR_RESET);
+    printf("  • Búfer: %s%d espacios%s\n", COLOR_SUCCESS, buffer_size, COLOR_RESET);
+    printf("  • Archivo: %s%s%s (%s%d bytes%s)\n", 
+           COLOR_SUCCESS, source_file, COLOR_RESET,
+           COLOR_SUCCESS, data->source_size, COLOR_RESET);
+    printf("  • Memoria total: %s%zu bytes%s\n", COLOR_SUCCESS, shm_size, COLOR_RESET);
+    printf("  • Receptores máximos: %s%d%s\n\n", COLOR_SUCCESS, MAX_RECEIVERS, COLOR_RESET);
 
     // Desmapea la memoria
     munmap(data, shm_size);
