@@ -4,24 +4,30 @@ int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     
+    // Mensaje inicial e instalación de señal Ctrl+C
     printf("Finalizador iniciado. Presione Ctrl+C para apagar y mostrar estadísticas.\n");
     signal(SIGINT, sigterm_handler);
     
+    // Abrir memoria compartida existente
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("Finalizador: shm_open falló");
         return EXIT_FAILURE;
     }
     
+    // Mapeo temporal para calcular tamaño real
     shared_data* temp_map = mmap(0, sizeof(shared_data), PROT_READ, MAP_SHARED, shm_fd, 0);
     if (temp_map == MAP_FAILED) {
         perror("Finalizador: mmap temporal falló");
         close(shm_fd);
         return EXIT_FAILURE;
     }
-    size_t shm_size = sizeof(shared_data) + temp_map->buffer_size * sizeof(buffer_entry) + temp_map->buffer_size * sizeof(sem_t);
+    size_t shm_size = sizeof(shared_data) 
+                    + temp_map->buffer_size * sizeof(buffer_entry)
+                    + temp_map->buffer_size * sizeof(sem_t);
     munmap(temp_map, sizeof(shared_data));
     
+    // Mapeo completo de la memoria
     shared_data *data = mmap(0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (data == MAP_FAILED) {
         perror("Finalizador: mmap final falló");
@@ -30,15 +36,16 @@ int main(int argc, char *argv[]) {
     }
     close(shm_fd);
     
-    while(keep_running) {
+    // Esperar señal de interrupción 
+    while (keep_running) {
         pause();
     }
     
     printf("\n\033[1;33mSeñal de apagado recibida. Iniciando cierre elegante...\033[0m\n");
 
-    data->shutdown_requested = 1;
+    data->shutdown_requested = 1; // Avisar a todos que deben cerrar
 
-    // Despertar a cualquier proceso dormido para que pueda ver el flag de shutdown
+    // Despertar receptores dormidos y enviarles SIGTERM
     sem_wait(&data->receiver_registry_mutex);
     int total_processes = data->active_emitters + data->active_receivers;
     for (int i = 0; i < MAX_RECEIVERS; i++) {
@@ -49,17 +56,18 @@ int main(int argc, char *argv[]) {
     }
     sem_post(&data->receiver_registry_mutex);
     
-    // Despertar a los emisores que puedan estar esperando por un slot
+    // Despertar emisores bloqueados por falta de espacio
     int buffer_size = data->buffer_size;
-    for(int i=0; i < buffer_size; ++i) {
+    for (int i = 0; i < buffer_size; ++i) {
         sem_post(&data->empty_slots);
     }
     
+    // Enviar SIGTERM a los procesos emisor
     system("pkill -SIGTERM emisor 2>/dev/null");
     
     printf("Esperando a que todos los procesos finalicen (%d procesos activos)...\n", total_processes);
     
-    // SOLUCIÓN: Espera bloqueante en lugar de busy-waiting con nanosleep
+    // Esperar que cada proceso confirme su finalización
     for (int i = 0; i < total_processes; i++) {
         if (sem_wait(&data->process_finished) == -1) {
             perror("Error esperando finalización de procesos");
@@ -73,7 +81,7 @@ int main(int argc, char *argv[]) {
     
     printf("\033[1;32m✓ Todos los procesos han finalizado.\033[0m\n");
 
-    // Mostrar estadísticas
+    // Estadisticas
     printf("\n\033[1;36m========== ESTADÍSTICAS FINALES ==========\033[0m\n");
     printf("  • Total de emisores conectados: %d\n", data->total_emitters);
     printf("  • Total de receptores conectados: %d\n", data->total_receivers);
@@ -84,20 +92,24 @@ int main(int argc, char *argv[]) {
 
     printf("\nLiberando recursos del sistema...\n");
     
-    // Destruir semáforos
+    // Destruir semáforos 
     sem_destroy(&data->empty_slots);
     sem_destroy(&data->producer_mutex);
     sem_destroy(&data->receiver_registry_mutex);
     sem_destroy(&data->process_finished);
     
-    for(int i=0; i<MAX_RECEIVERS; ++i) {
+    // Destruir semáforos de receptores
+    for (int i = 0; i < MAX_RECEIVERS; ++i) {
         sem_destroy(&data->receivers[i].data_available);
     }
+
+    // Destruir semáforos por cada slot del búfer
     sem_t* slot_mutexes = get_slot_mutexes(data);
-    for(int i=0; i<buffer_size; ++i) {
+    for (int i = 0; i < buffer_size; ++i) {
         sem_destroy(&slot_mutexes[i]);
     }
     
+    // Liberar memoria compartida
     munmap(data, shm_size);
     shm_unlink(SHM_NAME);
     
