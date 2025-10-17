@@ -1,87 +1,146 @@
 #include "shared_memory.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <semaphore.h>
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     if (argc != 3) {
-        fprintf(stderr, "Uso: %s <id_compartido> <clave>\n", argv[0]);
-        return 1;
+        fprintf(stderr, "Uso: %s <'manual' | milisegundos> <llave_8bits>\n", argv[0]);
+        return EXIT_FAILURE;
     }
+    
+    // ✅ Lógica para parsear el modo de ejecución
+    int is_manual = (strcmp(argv[1], "manual") == 0);
+    long delay_ms = 0;
+    if (!is_manual) {
+        delay_ms = atol(argv[1]);
+        if (delay_ms < 0) {
+            fprintf(stderr, "El tiempo de espera debe ser un entero no negativo.\n");
+            return EXIT_FAILURE;
+        }
+    }
+    char key = (char)atoi(argv[2]);
+    
+    int my_slot = -1;
 
-    const char* shm_name = argv[1];
-    unsigned char key = (unsigned char)atoi(argv[2]);
-
-    // 1. Abrir memoria compartida
-    int shm_fd = shm_open(shm_name, O_RDWR, 0666);
+    int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if (shm_fd == -1) {
-        perror("shm_open");
-        return 1;
+        perror("Receptor: shm_open falló");
+        return EXIT_FAILURE;
     }
 
-    // 2. Mapear memoria
-    SharedMemory* shm = mmap(NULL, sizeof(SharedMemory) + 10 * sizeof(BufferElement),
-                           PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shm == MAP_FAILED) {
-        perror("mmap");
-        return 1;
+    shared_data* temp_map = mmap(0, sizeof(shared_data), PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (temp_map == MAP_FAILED) {
+        perror("Receptor: mmap temporal falló");
+        close(shm_fd);
+        return EXIT_FAILURE;
+    }
+    size_t shm_size = sizeof(shared_data) + temp_map->buffer_size * sizeof(buffer_entry) + temp_map->buffer_size * sizeof(sem_t);
+    munmap(temp_map, sizeof(shared_data));
+
+    shared_data *data = mmap(0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (data == MAP_FAILED) {
+        perror("Receptor: mmap final falló");
+        close(shm_fd);
+        return EXIT_FAILURE;
+    }
+    close(shm_fd);
+
+    signal(SIGTERM, sigterm_handler);
+
+    char filename[50];
+    sprintf(filename, "output_receptor_%d.txt", getpid());
+    FILE *output_file = fopen(filename, "w");
+    if (!output_file) {
+        perror("No se pudo crear el archivo de salida");
+        munmap(data, shm_size);
+        return EXIT_FAILURE;
     }
 
-    // 3. Abrir semáforos
-    sem_t* sem_empty = sem_open(shm->sem_empty_name, 0);
-    sem_t* sem_full = sem_open(shm->sem_full_name, 0);
-    sem_t* sem_mutex = sem_open(shm->sem_mutex_name, 0);
+    sem_wait(&data->receiver_registry_mutex);
+    for (int i = 0; i < MAX_RECEIVERS; ++i) {
+        if (data->receivers[i].pid == 0) {
+            my_slot = i;
+            data->receivers[i].pid = getpid();
+            data->receivers[i].read_index = data->write_index;
+            data->receivers[i].is_manual = is_manual;
+            break;
+        }
+    }
+    if (my_slot != -1) {
+        data->total_receivers++;
+        data->active_receivers++;
+    }
+    sem_post(&data->receiver_registry_mutex);
 
-    if (sem_empty == SEM_FAILED || sem_full == SEM_FAILED || sem_mutex == SEM_FAILED) {
-        perror("sem_open");
-        return 1;
+    if (my_slot == -1) {
+        fprintf(stderr, "No hay slots disponibles para receptores\n");
+        fclose(output_file);
+        munmap(data, shm_size);
+        return EXIT_FAILURE;
     }
 
-    printf("=== RECEPTOR SIMPLE ===\n");
-    printf("Esperando caracteres...\n");
+    printf("Receptor (PID %d) en modo %s. Escribiendo a %s\n", getpid(), is_manual ? "Manual" : "Automático", filename);
 
-    while (1) { // Bucle infinito simple
-        // Esperar por un elemento
-        sem_wait(sem_full);
+    while (keep_running && !data->shutdown_requested) {
+        if (is_manual) {
+            printf("Presione Enter para leer el siguiente caracter...\n");
+            if (getchar() == EOF || !keep_running || data->shutdown_requested) break;
+        }
 
-        // Entrar a sección crítica
-        sem_wait(sem_mutex);
+        if (sem_wait(&data->receivers[my_slot].data_available) == -1) {
+            if (keep_running && !data->shutdown_requested) perror("sem_wait data_available");
+            break;
+        }
+        if (!keep_running || data->shutdown_requested) break;
 
-        // Leer del buffer
-        int pos = shm->read_pos;
-        char decoded_char = '?';
+        int my_read_idx = data->receivers[my_slot].read_index;
+        
+        sem_t* slot_mutexes = get_slot_mutexes(data);
+        sem_wait(&slot_mutexes[my_read_idx]);
+        
+        char decrypted_char = data->buffer[my_read_idx].ascii_val ^ key;
+        
+        // ✅ CORREGIDO: Se lee el timestamp que el emisor guardó en el búfer
+        time_t insertion_time = data->buffer[my_read_idx].timestamp;
+                
+        int reads_after = __sync_sub_and_fetch(&data->buffer[my_read_idx].read_count, 1);
 
-        // Asegurarse que no ha sido leído por otro receptor simple
-        if (shm->buffer[pos].read == 0) {
-            unsigned char encoded_val = shm->buffer[pos].ascii_value;
-            decoded_char = xor_encode(encoded_val, key);
-            shm->buffer[pos].read = 1; // Marcar como leído
-            shm->read_pos = (shm->read_pos + 1) % shm->buffer_size;
-            printf("Recibido: '%c'\n", decoded_char);
-            
-            // Salir de sección crítica
-            sem_post(sem_mutex);
-            // Notificar que hay un espacio libre
-            sem_post(sem_empty);
+        // ✅ CORREGIDO: Se usa la función centralizada con timestamp
+        print_char_info("Receptor", getpid(), decrypted_char, my_read_idx, insertion_time);
+
+        // Impresión adicional para informar sobre el estado del slot
+        if (reads_after == 0) {
+            printf("     └─ ¡Último lector! Búfer[%d] liberado.\n", my_read_idx);
+            sem_post(&data->empty_slots);
         } else {
-             // Ya fue leído, liberar mutex y volver a esperar
-            sem_post(sem_mutex);
-            sem_post(sem_full); // Devolver el "ticket" para que otro intente
+            printf("     └─ Quedan %d lectores para el búfer[%d].\n", reads_after, my_read_idx);
+        }
+
+        sem_post(&slot_mutexes[my_read_idx]);
+        
+        data->receivers[my_slot].read_index = (my_read_idx + 1) % data->buffer_size;
+
+        fputc(decrypted_char, output_file);
+        fflush(output_file);
+
+        // ✅ Lógica de espera dinámica según modo
+        if (!is_manual) {
+            struct timespec ts;
+            ts.tv_sec = delay_ms / 1000;
+            ts.tv_nsec = (delay_ms % 1000) * 1000000;
+            nanosleep(&ts, NULL);
         }
     }
 
-    // Este código nunca se alcanza en este diseño simple,
-    // pero se incluye por completitud.
-    printf("Receptor simple ha finalizado.\n");
-    sem_close(sem_empty);
-    sem_close(sem_full);
-    sem_close(sem_mutex);
-    munmap(shm, sizeof(SharedMemory));
-    close(shm_fd);
+    sem_wait(&data->receiver_registry_mutex);
+    if(my_slot != -1) {
+        data->receivers[my_slot].pid = 0;
+        data->active_receivers--;
+    }
+    sem_post(&data->receiver_registry_mutex);
 
-    return 0;
+    sem_post(&data->process_finished);
+    
+    printf("Receptor (PID %d) finalizando.\n", getpid());
+    fclose(output_file);
+    munmap(data, shm_size);
+    return EXIT_SUCCESS;
 }
